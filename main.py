@@ -1,6 +1,7 @@
 import os
 import json
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -11,6 +12,13 @@ client = OpenAI(api_key=os.getenv("OPENAI_KEY"))
 LLM_NAME = os.getenv("LLM_NAME")
 
 app = FastAPI(title="French Tutor API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # schema definitions
