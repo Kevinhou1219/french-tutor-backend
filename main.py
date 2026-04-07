@@ -71,7 +71,7 @@ def log_to_db(user_id: str, content: str, is_word: bool) -> None:
         cursor = conn.cursor()
         cursor.execute(
             "INSERT INTO users (user_id, content, is_word, is_sentence) VALUES (?, ?, ?, ?)",
-            user_id, content, int(is_word), int(not is_word)
+            (user_id, content, int(is_word), int(not is_word))
         )
         conn.commit()
         conn.close()
