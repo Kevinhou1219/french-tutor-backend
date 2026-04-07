@@ -15,7 +15,7 @@ app = FastAPI(title="French Tutor API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173", "https://icy-ocean-093948e10.7.azurestaticapps.net"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
