@@ -45,6 +45,12 @@ class WordResponse(BaseModel):
     common_phrases: list[str] | None
     example_sentence: str
 
+class QuestionRequest(BaseModel):
+    question: str
+
+class QuestionResponse(BaseModel):
+    answer: str
+
 
 # system prompts
 SENTENCE_SYSTEM_PROMPT = """You are a French language tutor. Given a French sentence, respond with a JSON object containing:
@@ -52,6 +58,12 @@ SENTENCE_SYSTEM_PROMPT = """You are a French language tutor. Given a French sent
 - "tense": brief explanation of the grammatical tense (French name).
 - "grammar_points": brief explanation of any complex grammar points in English; use null if none.
 - "idiomatic_expressions": brief explanation of any idiomatic expressions and their meanings in English; use null if none.
+
+Respond only with valid JSON. No markdown, no extra text."""
+
+QA_SYSTEM_PROMPT = """You are a French language tutor. Answer the student's question thoroughly and clearly.
+Respond with a JSON object containing a single key:
+- "answer": your full answer as an HTML string. Use <p>, <ul>, <li>, <strong>, <em>, and <code> tags as appropriate to structure and format the response for display on a webpage. Do not include <html>, <head>, or <body> tags.
 
 Respond only with valid JSON. No markdown, no extra text."""
 
@@ -105,3 +117,8 @@ def analyze_word(request: WordRequest) -> WordResponse:
     data = call_llm(WORD_SYSTEM_PROMPT, request.word)
     log_to_db(request.user_id, request.word, is_word=True)
     return WordResponse(**data)
+
+@app.post("/qa", response_model=QuestionResponse)
+def answer_question(request: QuestionRequest) -> QuestionResponse:
+    data = call_llm(QA_SYSTEM_PROMPT, request.question)
+    return QuestionResponse(**data)
