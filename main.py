@@ -61,7 +61,7 @@ SENTENCE_SYSTEM_PROMPT = """You are a French language tutor. Given a French sent
 
 Respond only with valid JSON. No markdown, no extra text."""
 
-QA_SYSTEM_PROMPT = """You are a French language tutor. Answer the student's question thoroughly and clearly.
+QA_SYSTEM_PROMPT = """You are a French language tutor. Answer the student's question thoroughly and clearly. No need to ask follow-up questions or ask for clarification unless necessary.
 Respond with a JSON object containing a single key:
 - "answer": your full answer as an HTML string. Use <p>, <ul>, <li>, <strong>, <em>, and <code> tags as appropriate to structure and format the response for display on a webpage. Do not include <html>, <head>, or <body> tags.
 
