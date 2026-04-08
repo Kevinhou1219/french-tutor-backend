@@ -51,6 +51,21 @@ class QuestionRequest(BaseModel):
 class QuestionResponse(BaseModel):
     answer: str
 
+class DashboardRequest(BaseModel):
+    user_id: str
+
+class DashboardResponse(BaseModel):
+    word_seeds: int
+    sentence_seeds: int
+    total_seeds: int
+    word_water: int
+    sentence_water: int
+    total_water: int
+    word_flowers: int
+    sentence_flowers: int
+    total_flowers: int
+    oldest_seed_days: int | None
+
 
 # system prompts
 SENTENCE_SYSTEM_PROMPT = """You are a French language tutor. Given a French sentence, respond with a JSON object containing:
@@ -122,3 +137,61 @@ def analyze_word(request: WordRequest) -> WordResponse:
 def answer_question(request: QuestionRequest) -> QuestionResponse:
     data = call_llm(QA_SYSTEM_PROMPT, request.question)
     return QuestionResponse(**data)
+
+@app.post("/dashboard", response_model=DashboardResponse)
+def get_dashboard(request: DashboardRequest) -> DashboardResponse:
+    try:
+        conn = pyodbc.connect(DB_CONNECTION_STRING)
+        cursor = conn.cursor()
+        uid = request.user_id
+
+        cursor.execute("SELECT COUNT(*) FROM users WHERE user_id=? AND is_word=1 AND mastered=0", uid)
+        word_seeds = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM users WHERE user_id=? AND is_sentence=1 AND mastered=0", uid)
+        sentence_seeds = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM users WHERE user_id=? AND mastered=0", uid)
+        total_seeds = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COALESCE(SUM(review_count), 0) FROM users WHERE user_id=? AND is_word=1", uid)
+        word_water = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COALESCE(SUM(review_count), 0) FROM users WHERE user_id=? AND is_sentence=1", uid)
+        sentence_water = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COALESCE(SUM(review_count), 0) FROM users WHERE user_id=?", uid)
+        total_water = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM users WHERE user_id=? AND is_word=1 AND mastered=1", uid)
+        word_flowers = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM users WHERE user_id=? AND is_sentence=1 AND mastered=1", uid)
+        sentence_flowers = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM users WHERE user_id=? AND mastered=1", uid)
+        total_flowers = cursor.fetchone()[0]
+
+        cursor.execute(
+            "SELECT DATEDIFF(day, MIN(time), SYSUTCDATETIME()) FROM users WHERE user_id=? AND mastered=0",
+            uid
+        )
+        oldest_seed_days = cursor.fetchone()[0]
+
+        conn.close()
+        return DashboardResponse(
+            word_seeds=word_seeds,
+            sentence_seeds=sentence_seeds,
+            total_seeds=total_seeds,
+            word_water=word_water,
+            sentence_water=sentence_water,
+            total_water=total_water,
+            word_flowers=word_flowers,
+            sentence_flowers=sentence_flowers,
+            total_flowers=total_flowers,
+            oldest_seed_days=oldest_seed_days,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DB error: {e}")
