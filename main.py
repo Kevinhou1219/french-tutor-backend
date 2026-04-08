@@ -121,8 +121,12 @@ def log_to_db(user_id: str, content: str, is_word: bool) -> None:
         conn = pyodbc.connect(DB_CONNECTION_STRING)
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO users (user_id, content, is_word, is_sentence, mastered, review_count) VALUES (?, ?, ?, ?, ?, ?)",
-            (user_id, content, int(is_word), int(not is_word), 0, 0)
+            """
+            INSERT INTO users (user_id, content, is_word, is_sentence, mastered, review_count)
+            SELECT ?, ?, ?, ?, 0, 0
+            WHERE NOT EXISTS (SELECT 1 FROM users WHERE user_id=? AND content=?)
+            """,
+            (user_id, content, int(is_word), int(not is_word), user_id, content)
         )
         conn.commit()
         conn.close()
