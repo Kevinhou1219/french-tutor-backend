@@ -66,6 +66,23 @@ class DashboardResponse(BaseModel):
     total_flowers: int
     oldest_seed_days: int | None
 
+class ReviewRequest(BaseModel):
+    user_id: str
+    mode: str  # "random" = pick a random unmastered item; "oldest" = pick the unmastered item with the earliest insertion time
+
+class ReviewResponse(BaseModel):
+    id: int
+    content: str
+    is_word: bool
+    is_sentence: bool
+    review_count: int
+    age: int  # days since the record was inserted
+
+class MarkRequest(BaseModel):
+    user_id: str
+    id: int
+    status: str  # "done" = set mastered=true; "not_done" = no-op (keep for future retry)
+
 
 # system prompts
 SENTENCE_SYSTEM_PROMPT = """You are a French language tutor. Given a French sentence, respond with a JSON object containing:
@@ -137,6 +154,74 @@ def analyze_word(request: WordRequest) -> WordResponse:
 def answer_question(request: QuestionRequest) -> QuestionResponse:
     data = call_llm(QA_SYSTEM_PROMPT, request.question)
     return QuestionResponse(**data)
+
+@app.post("/review_item", response_model=ReviewResponse)
+def review_item(request: ReviewRequest) -> ReviewResponse:
+    try:
+        conn = pyodbc.connect(DB_CONNECTION_STRING)
+        cursor = conn.cursor()
+
+        # Select the target item based on mode before mutating
+        if request.mode == "oldest":
+            cursor.execute(
+                "SELECT TOP 1 id FROM users WHERE user_id=? AND mastered=0 ORDER BY time ASC",
+                request.user_id
+            )
+        else:  # "random"
+            cursor.execute(
+                "SELECT TOP 1 id FROM users WHERE user_id=? AND mastered=0 ORDER BY NEWID()",
+                request.user_id
+            )
+
+        row = cursor.fetchone()
+        if row is None:
+            conn.close()
+            raise HTTPException(status_code=404, detail="No unmastered items found for this user.")
+
+        item_id = row[0]
+
+        # Increment review_count before returning
+        cursor.execute("UPDATE users SET review_count = review_count + 1 WHERE id=?", item_id)
+        conn.commit()
+
+        cursor.execute(
+            "SELECT id, content, is_word, is_sentence, review_count, DATEDIFF(day, time, SYSUTCDATETIME()) FROM users WHERE id=?",
+            item_id
+        )
+        item = cursor.fetchone()
+        conn.close()
+
+        return ReviewResponse(
+            id=item[0],
+            content=item[1],
+            is_word=bool(item[2]),
+            is_sentence=bool(item[3]),
+            review_count=item[4],
+            age=item[5],
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DB error: {e}")
+
+@app.post("/mark_item", status_code=204)
+def mark_item(request: MarkRequest) -> None:
+    # status="done"     → sets mastered=true on the item
+    # status="not_done" → no-op; item remains in the review pool
+    if request.status != "done":
+        return
+
+    try:
+        conn = pyodbc.connect(DB_CONNECTION_STRING)
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET mastered=1 WHERE id=? AND user_id=?",
+            (request.id, request.user_id)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DB error: {e}")
 
 @app.post("/dashboard", response_model=DashboardResponse)
 def get_dashboard(request: DashboardRequest) -> DashboardResponse:
