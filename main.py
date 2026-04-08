@@ -83,6 +83,13 @@ class MarkRequest(BaseModel):
     id: int
     status: str  # "done" = set mastered=true; "not_done" = no-op (keep for future retry)
 
+class ActivityRequest(BaseModel):
+    user_id: str
+
+class ActivityResponse(BaseModel):
+    created: list[int]   # count of new items per day, index 0 = 30 days ago, index 29 = today
+    mastered: list[int]  # count of mastered items per day, same indexing
+
 
 # system prompts
 SENTENCE_SYSTEM_PROMPT = """You are a French language tutor. Given a French sentence, respond with a JSON object containing:
@@ -220,6 +227,50 @@ def mark_item(request: MarkRequest) -> None:
         )
         conn.commit()
         conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DB error: {e}")
+
+@app.post("/activity", response_model=ActivityResponse)
+def get_activity(request: ActivityRequest) -> ActivityResponse:
+    try:
+        conn = pyodbc.connect(DB_CONNECTION_STRING)
+        cursor = conn.cursor()
+        uid = request.user_id
+
+        # Returns (days_ago, count) for items created in last 30 days
+        cursor.execute(
+            """
+            SELECT DATEDIFF(day, time, SYSUTCDATETIME()) AS days_ago, COUNT(*) AS cnt
+            FROM users
+            WHERE user_id=? AND DATEDIFF(day, time, SYSUTCDATETIME()) BETWEEN 0 AND 29
+            GROUP BY DATEDIFF(day, time, SYSUTCDATETIME())
+            """,
+            uid
+        )
+        created_map = {row[0]: row[1] for row in cursor.fetchall()}
+
+        # Returns (days_ago, count) for items mastered in last 30 days
+        cursor.execute(
+            """
+            SELECT DATEDIFF(day, mastered_time, SYSUTCDATETIME()) AS days_ago, COUNT(*) AS cnt
+            FROM users
+            WHERE user_id=? AND mastered_time IS NOT NULL
+              AND DATEDIFF(day, mastered_time, SYSUTCDATETIME()) BETWEEN 0 AND 29
+            GROUP BY DATEDIFF(day, mastered_time, SYSUTCDATETIME())
+            """,
+            uid
+        )
+        mastered_map = {row[0]: row[1] for row in cursor.fetchall()}
+
+        conn.close()
+
+        # index 0 = 30 days ago, index 29 = today  →  days_ago = 29 - i
+        created  = [created_map.get(29 - i, 0) for i in range(30)]
+        mastered = [mastered_map.get(29 - i, 0) for i in range(30)]
+
+        return ActivityResponse(created=created, mastered=mastered)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DB error: {e}")
 
