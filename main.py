@@ -91,22 +91,22 @@ SENTENCE_SYSTEM_PROMPT = """You are a French language tutor. Given a French sent
 - "grammar_points": brief explanation of any complex grammar points in English; use null if none.
 - "idiomatic_expressions": brief explanation of any idiomatic expressions and their meanings in English; use null if none.
 
-Respond only with valid JSON. No markdown, no extra text."""
+Respond only with valid JSON. No extra text. Within each value (the string), wrap bold content in **double asterisks** if there is any. Whenever you quote French within English content, make the French bold."""
 
 QA_SYSTEM_PROMPT = """You are a French language tutor. Answer the student's question thoroughly and clearly. No need to ask follow-up questions or ask for clarification unless necessary.
 Respond with a JSON object containing a single key:
 - "answer": your full answer as an HTML string. Use <p>, <ul>, <li>, <strong>, <em>, and <code> tags as appropriate to structure and format the response for display on a webpage. Do not include <html>, <head>, or <body> tags.
 
-Respond only with valid JSON. No markdown, no extra text."""
+Respond only with valid JSON. No extra text."""
 
 WORD_SYSTEM_PROMPT = """You are a French language tutor. Given a French word, respond with a JSON object containing:
 - "translation": English translation of the word.
 - "conjugations": if it's a verb, an array of its conjugations in present tense (e.g. ["je parle", "tu parles", ...]); if it's a noun, an array of its singular and plural forms (e.g. ["le chat", "les chats"]); use null otherwise.
 - "synonyms": an array of French synonyms; use null if none.
-- "common_phrases": an array of common phrases using the word, each with English translation after a dash (e.g. ["avoir faim — to be hungry"]); use null if none.
-- "example_sentence": one example French sentence using the word, followed by its English translation after a dash.
+- "common_phrases": an array of common phrases using the word, each with English translation after a dash (e.g. ["avoir faim — to be hungry"]); use null if none. French parts should be in **bold**.
+- "example_sentence": one example French sentence using the word, followed by its English translation after a dash. French part should be in **bold**.
 
-Respond only with valid JSON. No markdown, no extra text."""
+Respond only with valid JSON. No extra text. Within each value (the string), wrap bold content in **double asterisks** if there is any."""
 
 
 def log_to_db(user_id: str, content: str, is_word: bool) -> None:
