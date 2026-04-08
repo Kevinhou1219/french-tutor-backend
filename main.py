@@ -90,6 +90,20 @@ class ActivityResponse(BaseModel):
     created: list[int]   # count of new items per day, index 0 = 30 days ago, index 29 = today
     mastered: list[int]  # count of mastered items per day, same indexing
 
+class InspectRequest(BaseModel):
+    user_id: str
+
+class InspectItem(BaseModel):
+    id: int
+    content: str
+    mastered_time: str
+
+class InspectResponse(BaseModel):
+    items: list[InspectItem]
+
+class ReplantRequest(BaseModel):
+    id: int
+
 
 # system prompts
 SENTENCE_SYSTEM_PROMPT = """You are a French language tutor. Given a French sentence, respond with a JSON object containing:
@@ -275,6 +289,40 @@ def get_activity(request: ActivityRequest) -> ActivityResponse:
         return ActivityResponse(created=created, mastered=mastered)
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DB error: {e}")
+
+@app.post("/inspect", response_model=InspectResponse)
+def inspect_bloomed(request: InspectRequest) -> InspectResponse:
+    try:
+        conn = pyodbc.connect(DB_CONNECTION_STRING)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, content, mastered_time FROM users WHERE user_id=? AND mastered=1 ORDER BY mastered_time DESC",
+            (request.user_id,)
+        )
+        items = [
+            InspectItem(id=row[0], content=row[1], mastered_time=row[2].isoformat())
+            for row in cursor.fetchall()
+        ]
+        conn.close()
+        return InspectResponse(items=items)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DB error: {e}")
+
+@app.post("/replant", status_code=204)
+def replant(request: ReplantRequest) -> None:
+    try:
+        conn = pyodbc.connect(DB_CONNECTION_STRING)
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET mastered=0, time=SYSUTCDATETIME(), mastered_time=NULL WHERE id=?",
+            request.id
+        )
+        conn.commit()
+        conn.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DB error: {e}")
 
