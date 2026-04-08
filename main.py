@@ -215,7 +215,7 @@ def mark_item(request: MarkRequest) -> None:
         conn = pyodbc.connect(DB_CONNECTION_STRING)
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE users SET mastered=1 WHERE id=? AND user_id=?",
+            "UPDATE users SET mastered=1, mastered_time=SYSUTCDATETIME() WHERE id=? AND user_id=?",
             (request.id, request.user_id)
         )
         conn.commit()
