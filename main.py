@@ -2,7 +2,6 @@ import os
 import json
 import pyodbc
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -14,14 +13,6 @@ LLM_NAME = os.getenv("LLM_NAME")
 DB_CONNECTION_STRING = os.getenv("DB_CONNECTION_STRING")
 
 app = FastAPI(title="French Tutor API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "https://icy-ocean-093948e10.7.azurestaticapps.net"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 # schema definitions
