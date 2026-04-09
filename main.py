@@ -1,7 +1,7 @@
 import os
 import json
 import pyodbc
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import OpenAI
@@ -18,6 +18,7 @@ app = FastAPI(title="French Tutor API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "https://icy-ocean-093948e10.7.azurestaticapps.net"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -26,7 +27,6 @@ app.add_middleware(
 # schema definitions
 class SentenceRequest(BaseModel):
     sentence: str
-    user_id: str
 
 class SentenceResponse(BaseModel):
     translation: str
@@ -36,7 +36,6 @@ class SentenceResponse(BaseModel):
 
 class WordRequest(BaseModel):
     word: str
-    user_id: str
 
 class WordResponse(BaseModel):
     translation: str
@@ -52,7 +51,7 @@ class QuestionResponse(BaseModel):
     answer: str
 
 class DashboardRequest(BaseModel):
-    user_id: str
+    pass
 
 class DashboardResponse(BaseModel):
     word_seeds: int
@@ -67,7 +66,6 @@ class DashboardResponse(BaseModel):
     oldest_seed_days: int | None
 
 class ReviewRequest(BaseModel):
-    user_id: str
     mode: str  # "random" = pick a random unmastered item; "oldest" = pick the unmastered item with the earliest insertion time
 
 class ReviewResponse(BaseModel):
@@ -79,19 +77,18 @@ class ReviewResponse(BaseModel):
     age: int  # days since the record was inserted
 
 class MarkRequest(BaseModel):
-    user_id: str
     id: int
     status: str  # "done" = set mastered=true; "not_done" = no-op (keep for future retry)
 
 class ActivityRequest(BaseModel):
-    user_id: str
+    pass
 
 class ActivityResponse(BaseModel):
     created: list[int]   # count of new items per day, index 0 = 30 days ago, index 29 = today
     mastered: list[int]  # count of mastered items per day, same indexing
 
 class InspectRequest(BaseModel):
-    user_id: str
+    pass
 
 class InspectItem(BaseModel):
     id: int
@@ -130,6 +127,13 @@ WORD_SYSTEM_PROMPT = """You are a French language tutor. Given a French word, re
 Respond only with valid JSON. No extra text. Within each value (the string), wrap bold content in **double asterisks** if there is any."""
 
 
+def get_user_id(request: Request) -> str:
+    user_id = request.headers.get("X-MS-CLIENT-PRINCIPAL-ID")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user_id
+
+
 def log_to_db(user_id: str, content: str, is_word: bool) -> None:
     try:
         conn = pyodbc.connect(DB_CONNECTION_STRING)
@@ -163,16 +167,25 @@ def call_llm(system_prompt: str, user_message: str) -> dict:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/me")
+def me(request: Request):
+    user_id = get_user_id(request)
+    name = request.headers.get("X-MS-CLIENT-PRINCIPAL-NAME", "")
+    return {"user_id": user_id, "name": name}
+
+
 @app.post("/sentence", response_model=SentenceResponse)
-def analyze_sentence(request: SentenceRequest) -> SentenceResponse:
+def analyze_sentence(http_request: Request, request: SentenceRequest) -> SentenceResponse:
+    user_id = get_user_id(http_request)
     data = call_llm(SENTENCE_SYSTEM_PROMPT, request.sentence)
-    log_to_db(request.user_id, request.sentence, is_word=False)
+    log_to_db(user_id, request.sentence, is_word=False)
     return SentenceResponse(**data)
 
 @app.post("/word", response_model=WordResponse)
-def analyze_word(request: WordRequest) -> WordResponse:
+def analyze_word(http_request: Request, request: WordRequest) -> WordResponse:
+    user_id = get_user_id(http_request)
     data = call_llm(WORD_SYSTEM_PROMPT, request.word)
-    log_to_db(request.user_id, request.word, is_word=True)
+    log_to_db(user_id, request.word, is_word=True)
     return WordResponse(**data)
 
 @app.post("/qa", response_model=QuestionResponse)
@@ -181,7 +194,8 @@ def answer_question(request: QuestionRequest) -> QuestionResponse:
     return QuestionResponse(**data)
 
 @app.post("/review_item", response_model=ReviewResponse)
-def review_item(request: ReviewRequest) -> ReviewResponse:
+def review_item(http_request: Request, request: ReviewRequest) -> ReviewResponse:
+    user_id = get_user_id(http_request)
     try:
         conn = pyodbc.connect(DB_CONNECTION_STRING)
         cursor = conn.cursor()
@@ -190,12 +204,12 @@ def review_item(request: ReviewRequest) -> ReviewResponse:
         if request.mode == "oldest":
             cursor.execute(
                 "SELECT TOP 1 id FROM users WHERE user_id=? AND mastered=0 ORDER BY time ASC",
-                request.user_id
+                user_id
             )
         else:  # "random"
             cursor.execute(
                 "SELECT TOP 1 id FROM users WHERE user_id=? AND mastered=0 ORDER BY NEWID()",
-                request.user_id
+                user_id
             )
 
         row = cursor.fetchone()
@@ -230,18 +244,19 @@ def review_item(request: ReviewRequest) -> ReviewResponse:
         raise HTTPException(status_code=500, detail=f"DB error: {e}")
 
 @app.post("/mark_item", status_code=204)
-def mark_item(request: MarkRequest) -> None:
+def mark_item(http_request: Request, request: MarkRequest) -> None:
     # status="done"     → sets mastered=true on the item
     # status="not_done" → no-op; item remains in the review pool
     if request.status != "done":
         return
 
+    user_id = get_user_id(http_request)
     try:
         conn = pyodbc.connect(DB_CONNECTION_STRING)
         cursor = conn.cursor()
         cursor.execute(
             "UPDATE users SET mastered=1, mastered_time=SYSUTCDATETIME() WHERE id=? AND user_id=?",
-            (request.id, request.user_id)
+            (request.id, user_id)
         )
         conn.commit()
         conn.close()
@@ -249,11 +264,11 @@ def mark_item(request: MarkRequest) -> None:
         raise HTTPException(status_code=500, detail=f"DB error: {e}")
 
 @app.post("/activity", response_model=ActivityResponse)
-def get_activity(request: ActivityRequest) -> ActivityResponse:
+def get_activity(http_request: Request, request: ActivityRequest) -> ActivityResponse:
+    user_id = get_user_id(http_request)
     try:
         conn = pyodbc.connect(DB_CONNECTION_STRING)
         cursor = conn.cursor()
-        uid = request.user_id
 
         # Returns (days_ago, count) for items created in last 30 days
         cursor.execute(
@@ -263,7 +278,7 @@ def get_activity(request: ActivityRequest) -> ActivityResponse:
             WHERE user_id=? AND DATEDIFF(day, time, SYSUTCDATETIME()) BETWEEN 0 AND 29
             GROUP BY DATEDIFF(day, time, SYSUTCDATETIME())
             """,
-            uid
+            user_id
         )
         created_map = {row[0]: row[1] for row in cursor.fetchall()}
 
@@ -276,7 +291,7 @@ def get_activity(request: ActivityRequest) -> ActivityResponse:
               AND DATEDIFF(day, mastered_time, SYSUTCDATETIME()) BETWEEN 0 AND 29
             GROUP BY DATEDIFF(day, mastered_time, SYSUTCDATETIME())
             """,
-            uid
+            user_id
         )
         mastered_map = {row[0]: row[1] for row in cursor.fetchall()}
 
@@ -293,13 +308,14 @@ def get_activity(request: ActivityRequest) -> ActivityResponse:
         raise HTTPException(status_code=500, detail=f"DB error: {e}")
 
 @app.post("/inspect", response_model=InspectResponse)
-def inspect_bloomed(request: InspectRequest) -> InspectResponse:
+def inspect_bloomed(http_request: Request, request: InspectRequest) -> InspectResponse:
+    user_id = get_user_id(http_request)
     try:
         conn = pyodbc.connect(DB_CONNECTION_STRING)
         cursor = conn.cursor()
         cursor.execute(
             "SELECT id, content, mastered_time FROM users WHERE user_id=? AND mastered=1 ORDER BY mastered_time DESC",
-            (request.user_id,)
+            (user_id,)
         )
         items = [
             InspectItem(id=row[0], content=row[1], mastered_time=row[2].isoformat())
@@ -327,42 +343,42 @@ def replant(request: ReplantRequest) -> None:
         raise HTTPException(status_code=500, detail=f"DB error: {e}")
 
 @app.post("/dashboard", response_model=DashboardResponse)
-def get_dashboard(request: DashboardRequest) -> DashboardResponse:
+def get_dashboard(http_request: Request, request: DashboardRequest) -> DashboardResponse:
+    user_id = get_user_id(http_request)
     try:
         conn = pyodbc.connect(DB_CONNECTION_STRING)
         cursor = conn.cursor()
-        uid = request.user_id
 
-        cursor.execute("SELECT COUNT(*) FROM users WHERE user_id=? AND is_word=1 AND mastered=0", uid)
+        cursor.execute("SELECT COUNT(*) FROM users WHERE user_id=? AND is_word=1 AND mastered=0", user_id)
         word_seeds = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COUNT(*) FROM users WHERE user_id=? AND is_sentence=1 AND mastered=0", uid)
+        cursor.execute("SELECT COUNT(*) FROM users WHERE user_id=? AND is_sentence=1 AND mastered=0", user_id)
         sentence_seeds = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COUNT(*) FROM users WHERE user_id=? AND mastered=0", uid)
+        cursor.execute("SELECT COUNT(*) FROM users WHERE user_id=? AND mastered=0", user_id)
         total_seeds = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COALESCE(SUM(review_count), 0) FROM users WHERE user_id=? AND is_word=1", uid)
+        cursor.execute("SELECT COALESCE(SUM(review_count), 0) FROM users WHERE user_id=? AND is_word=1", user_id)
         word_water = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COALESCE(SUM(review_count), 0) FROM users WHERE user_id=? AND is_sentence=1", uid)
+        cursor.execute("SELECT COALESCE(SUM(review_count), 0) FROM users WHERE user_id=? AND is_sentence=1", user_id)
         sentence_water = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COALESCE(SUM(review_count), 0) FROM users WHERE user_id=?", uid)
+        cursor.execute("SELECT COALESCE(SUM(review_count), 0) FROM users WHERE user_id=?", user_id)
         total_water = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COUNT(*) FROM users WHERE user_id=? AND is_word=1 AND mastered=1", uid)
+        cursor.execute("SELECT COUNT(*) FROM users WHERE user_id=? AND is_word=1 AND mastered=1", user_id)
         word_flowers = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COUNT(*) FROM users WHERE user_id=? AND is_sentence=1 AND mastered=1", uid)
+        cursor.execute("SELECT COUNT(*) FROM users WHERE user_id=? AND is_sentence=1 AND mastered=1", user_id)
         sentence_flowers = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COUNT(*) FROM users WHERE user_id=? AND mastered=1", uid)
+        cursor.execute("SELECT COUNT(*) FROM users WHERE user_id=? AND mastered=1", user_id)
         total_flowers = cursor.fetchone()[0]
 
         cursor.execute(
             "SELECT DATEDIFF(day, MIN(time), SYSUTCDATETIME()) FROM users WHERE user_id=? AND mastered=0",
-            uid
+            user_id
         )
         oldest_seed_days = cursor.fetchone()[0]
 
