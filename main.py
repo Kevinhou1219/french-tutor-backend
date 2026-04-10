@@ -178,6 +178,28 @@ def me(request: Request):
     user_id = get_user_id(request)
     name = request.headers.get("X-MS-CLIENT-PRINCIPAL-NAME", "")
     given_name = _get_claim(request, "given_name")
+    family_name = _get_claim(request, "family_name")
+    preferred_username = _get_claim(request, "preferred_username")
+    display_name = _get_claim(request, "name")
+
+    try:
+        conn = pyodbc.connect(DB_CONNECTION_STRING)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            IF NOT EXISTS (SELECT 1 FROM user_registry WHERE user_id = ?)
+                INSERT INTO user_registry
+                    (user_id, name, given_name, family_name, preferred_username, display_name)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            user_id,
+            user_id, name, given_name, family_name, preferred_username, display_name,
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
     return {"user_id": user_id, "name": name, "given_name": given_name}
 
 
