@@ -1,5 +1,6 @@
 import os
 import json
+import base64
 import pyodbc
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
@@ -158,11 +159,26 @@ def call_llm(system_prompt: str, user_message: str) -> dict:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _get_claim(request: Request, claim_type: str) -> str | None:
+    principal = request.headers.get("X-MS-CLIENT-PRINCIPAL")
+    if not principal:
+        return None
+    try:
+        payload = json.loads(base64.b64decode(principal))
+        for claim in payload.get("claims", []):
+            if claim.get("typ") == claim_type:
+                return claim.get("val") or None
+    except Exception:
+        pass
+    return None
+
+
 @app.get("/me")
 def me(request: Request):
     user_id = get_user_id(request)
     name = request.headers.get("X-MS-CLIENT-PRINCIPAL-NAME", "")
-    return {"user_id": user_id, "name": name}
+    given_name = _get_claim(request, "given_name")
+    return {"user_id": user_id, "name": name, "given_name": given_name}
 
 
 @app.post("/sentence", response_model=SentenceResponse)
