@@ -179,7 +179,7 @@ def me(request: Request):
     name = request.headers.get("X-MS-CLIENT-PRINCIPAL-NAME", "")
     given_name = _get_claim(request, "given_name")
     family_name = _get_claim(request, "family_name")
-    preferred_username = _get_claim(request, "preferred_username")
+    preferred_username = _get_claim(request, "email")
     display_name = _get_claim(request, "name")
 
     try:
@@ -200,7 +200,7 @@ def me(request: Request):
     except Exception:
         pass
 
-    return {"user_id": user_id, "name": name, "given_name": given_name}
+    return {"user_id": user_id, "name": name, "given_name": given_name, "display_name": display_name, "preferred_username": preferred_username}
 
 
 @app.post("/sentence", response_model=SentenceResponse)
