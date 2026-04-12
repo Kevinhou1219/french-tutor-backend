@@ -30,11 +30,12 @@ class WordRequest(BaseModel):
     word: str
 
 class WordResponse(BaseModel):
-    translation: str
+    valid: bool
+    translation: str | None
     conjugations: list[str] | None
     synonyms: list[str] | None
     common_phrases: list[str] | None
-    example_sentence: str
+    example_sentence: str | None
 
 class QuestionRequest(BaseModel):
     question: str
@@ -110,11 +111,12 @@ Respond with a JSON object containing a single key:
 Respond only with valid JSON. No extra text."""
 
 WORD_SYSTEM_PROMPT = """You are a French language tutor. Given a French word, respond with a JSON object containing:
-- "translation": English translation of the word. Provide the part of speech in parentheses after the translation (e.g. "cat (noun)", "to speak (verb)").
+- "valid": true if the input is a real French word or a recognisable inflected form of one (e.g. a conjugated verb, a plural noun, a feminine adjective) — even if it is not the base/dictionary form. Set to false if the input is a typo, gibberish, or otherwise not a real French word.
+- "translation": English translation of the word. Provide the part of speech in parentheses after the translation (e.g. "cat (noun)", "to speak (verb)"). Use null if valid is false.
 - "conjugations": if it's a verb, an array of its conjugations in present tense (e.g. ["je parle", "tu parles", ...]); if it's a noun, an array of its singular and plural forms (e.g. ["le chat", "les chats"]); use null otherwise.
 - "synonyms": an array of French synonyms; use null if none.
 - "common_phrases": an array of common phrases using the word, each with English translation after a dash (e.g. ["avoir faim — to be hungry"]); use null if none. French parts should be in **bold**.
-- "example_sentence": one example French sentence using the word, followed by its English translation after a dash. French part should be in **bold**.
+- "example_sentence": one example French sentence using the word, followed by its English translation after a dash. French part should be in **bold**. Use null if valid is false.
 
 Respond only with valid JSON. No extra text. Within each value (the string), wrap bold content in **double asterisks** if there is any."""
 
@@ -246,6 +248,8 @@ def analyze_sentence(http_request: Request, request: SentenceRequest) -> Sentenc
 def analyze_word(http_request: Request, request: WordRequest) -> WordResponse:
     user_id = get_user_id(http_request)
     data = call_llm(WORD_SYSTEM_PROMPT, request.word)
+    if not data.get("valid"):
+        raise HTTPException(status_code=400, detail="That doesn't look like a French word — check your spelling and try again.")
     log_to_db(user_id, request.word, is_word=True)
     return WordResponse(**data)
 
