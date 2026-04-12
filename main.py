@@ -180,8 +180,9 @@ def me(request: Request):
     given_name = _get_claim(request, "given_name")
     family_name = _get_claim(request, "family_name")
     preferred_username = _get_claim(request, "email")
-    display_name = _get_claim(request, "name")
+    claim_display_name = _get_claim(request, "name")
 
+    display_name = claim_display_name
     try:
         conn = pyodbc.connect(DB_CONNECTION_STRING)
         cursor = conn.cursor()
@@ -193,14 +194,45 @@ def me(request: Request):
                 VALUES (?, ?, ?, ?, ?, ?)
             """,
             user_id,
-            user_id, name, given_name, family_name, preferred_username, display_name,
+            user_id, name, given_name, family_name, preferred_username, claim_display_name,
         )
         conn.commit()
+        cursor.execute(
+            "SELECT display_name FROM user_registry WHERE user_id = ?",
+            user_id,
+        )
+        row = cursor.fetchone()
+        if row and row[0]:
+            display_name = row[0]
         conn.close()
     except Exception:
         pass
 
     return {"user_id": user_id, "name": name, "given_name": given_name, "display_name": display_name, "preferred_username": preferred_username}
+
+
+class UpdateDisplayNameRequest(BaseModel):
+    display_name: str
+
+
+@app.post("/update_display_name")
+def update_display_name(http_request: Request, request: UpdateDisplayNameRequest):
+    user_id = get_user_id(http_request)
+    name = request.display_name.strip()
+    if not name or len(name) > 25:
+        raise HTTPException(status_code=400, detail="display_name must be 1–25 characters")
+    try:
+        conn = pyodbc.connect(DB_CONNECTION_STRING)
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE user_registry SET display_name = ? WHERE user_id = ?",
+            name, user_id,
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DB error: {e}")
+    return {"display_name": name}
 
 
 @app.post("/sentence", response_model=SentenceResponse)
