@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import pyodbc
+import httpx
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from openai import OpenAI
@@ -12,6 +13,7 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_KEY"))
 LLM_NAME = os.getenv("LLM_NAME")
 DB_CONNECTION_STRING = os.getenv("DB_CONNECTION_STRING")
+AZURE_TRANSLATOR_KEY = os.getenv("AZURE_TRANSLATOR_KEY")
 
 app = FastAPI(title="French Tutor API")
 
@@ -93,6 +95,12 @@ class InspectResponse(BaseModel):
 
 class ReplantRequest(BaseModel):
     id: int
+
+class TranslateRequest(BaseModel):
+    text: str
+
+class TranslateResponse(BaseModel):
+    translation: str
 
 
 # system prompts
@@ -257,6 +265,23 @@ def analyze_word(http_request: Request, request: WordRequest) -> WordResponse:
 def answer_question(request: QuestionRequest) -> QuestionResponse:
     data = call_llm(QA_SYSTEM_PROMPT, request.question)
     return QuestionResponse(**data)
+
+@app.post("/translate", response_model=TranslateResponse)
+def translate_text(http_request: Request, request: TranslateRequest) -> TranslateResponse:
+    get_user_id(http_request)  # auth check only
+    resp = httpx.post(
+        "https://api.cognitive.microsofttranslator.com/translate",
+        params={"api-version": "3.0", "from": "fr", "to": "en"},
+        headers={
+            "Ocp-Apim-Subscription-Key": AZURE_TRANSLATOR_KEY,
+            "Content-Type": "application/json",
+        },
+        json=[{"text": request.text}],
+        timeout=10.0,
+    )
+    resp.raise_for_status()
+    translation = resp.json()[0]["translations"][0]["text"]
+    return TranslateResponse(translation=translation)
 
 @app.post("/review_item", response_model=ReviewResponse)
 def review_item(http_request: Request, request: ReviewRequest) -> ReviewResponse:
