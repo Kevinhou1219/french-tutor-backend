@@ -274,6 +274,7 @@ def translate_text(http_request: Request, request: TranslateRequest) -> Translat
         params={"api-version": "3.0", "from": "fr", "to": "en"},
         headers={
             "Ocp-Apim-Subscription-Key": AZURE_TRANSLATOR_KEY,
+            "Ocp-Apim-Subscription-Region": "centralus",
             "Content-Type": "application/json",
         },
         json=[{"text": request.text}],
