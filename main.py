@@ -175,6 +175,24 @@ _AZURE_HEADERS = {
     "Content-Type": "application/json",
 }
 
+def detect_french(text: str) -> bool:
+    try:
+        resp = httpx.post(
+            "https://api.cognitive.microsofttranslator.com/detect",
+            params={"api-version": "3.0"},
+            headers=_AZURE_HEADERS,
+            json=[{"text": text}],
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        detected = resp.json()[0]
+        return detected.get("language") == "fr" and detected.get("score", 0) >= 0.5
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 def call_translator_word(text: str) -> dict:
     try:
         detect_resp = httpx.post(
@@ -325,6 +343,8 @@ def update_display_name(http_request: Request, request: UpdateDisplayNameRequest
 @app.post("/sentence", response_model=SentenceResponse)
 def analyze_sentence(http_request: Request, request: SentenceRequest) -> SentenceResponse:
     user_id = get_user_id(http_request)
+    if not detect_french(request.sentence):
+        raise HTTPException(status_code=400, detail="That doesn't look like a French sentence — check your input and try again.")
     data = call_llm(SENTENCE_SYSTEM_PROMPT, request.sentence)
     log_to_db(user_id, request.sentence, is_word=False)
     return SentenceResponse(**data)
@@ -350,6 +370,8 @@ def analyze_word_quick(http_request: Request, request: WordRequest) -> WordRespo
 @app.post("/sentence_quick", response_model=SentenceResponse)
 def analyze_sentence_quick(http_request: Request, request: SentenceRequest) -> SentenceResponse:
     user_id = get_user_id(http_request)
+    if not detect_french(request.sentence):
+        raise HTTPException(status_code=400, detail="That doesn't look like a French sentence — check your input and try again.")
     data = call_translator_sentence(request.sentence)
     log_to_db(user_id, request.sentence, is_word=False)
     return SentenceResponse(**data)
