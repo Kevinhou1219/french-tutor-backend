@@ -24,7 +24,7 @@ class SentenceRequest(BaseModel):
 
 class SentenceResponse(BaseModel):
     translation: str
-    tense: str
+    tense: str | None
     grammar_points: str | None
     idiomatic_expressions: str | None
 
@@ -106,7 +106,7 @@ class TranslateResponse(BaseModel):
 # system prompts
 SENTENCE_SYSTEM_PROMPT = """You are a French language tutor. Given a French sentence, respond with a JSON object containing:
 - "translation": English translation of the sentence.
-- "tense": brief explanation of the grammatical tense (French name).
+- "tense": brief explanation of the grammatical tense (French name); use null if none.
 - "grammar_points": brief explanation of any complex grammar points in English; use null if none.
 - "idiomatic_expressions": brief explanation of any idiomatic expressions and their meanings in English; use null if none.
 
@@ -165,6 +165,83 @@ def call_llm(system_prompt: str, user_message: str) -> dict:
             ],
         )
         return json.loads(response.choices[0].message.content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+_AZURE_HEADERS = {
+    "Ocp-Apim-Subscription-Key": AZURE_TRANSLATOR_KEY,
+    "Ocp-Apim-Subscription-Region": "centralus",
+    "Content-Type": "application/json",
+}
+
+def call_translator_word(text: str) -> dict:
+    try:
+        detect_resp = httpx.post(
+            "https://api.cognitive.microsofttranslator.com/detect",
+            params={"api-version": "3.0"},
+            headers=_AZURE_HEADERS,
+            json=[{"text": text}],
+            timeout=10.0,
+        )
+        detect_resp.raise_for_status()
+        detected = detect_resp.json()[0]
+        valid = detected.get("language") == "fr" and detected.get("score", 0) >= 0.5
+
+        if not valid:
+            return {
+                "valid": False,
+                "translation": None,
+                "conjugations": None,
+                "synonyms": None,
+                "common_phrases": None,
+                "example_sentence": None,
+            }
+
+        translate_resp = httpx.post(
+            "https://api.cognitive.microsofttranslator.com/translate",
+            params={"api-version": "3.0", "from": "fr", "to": "en"},
+            headers=_AZURE_HEADERS,
+            json=[{"text": text}],
+            timeout=10.0,
+        )
+        translate_resp.raise_for_status()
+        translation = translate_resp.json()[0]["translations"][0]["text"]
+
+        return {
+            "valid": True,
+            "translation": translation,
+            "conjugations": None,
+            "synonyms": None,
+            "common_phrases": None,
+            "example_sentence": None,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def call_translator_sentence(text: str) -> dict:
+    try:
+        resp = httpx.post(
+            "https://api.cognitive.microsofttranslator.com/translate",
+            params={"api-version": "3.0", "from": "fr", "to": "en"},
+            headers=_AZURE_HEADERS,
+            json=[{"text": text}],
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        translation = resp.json()[0]["translations"][0]["text"]
+
+        return {
+            "translation": translation,
+            "tense": None,
+            "grammar_points": None,
+            "idiomatic_expressions": None,
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -260,6 +337,22 @@ def analyze_word(http_request: Request, request: WordRequest) -> WordResponse:
         raise HTTPException(status_code=400, detail="That doesn't look like a French word — check your spelling and try again.")
     log_to_db(user_id, request.word, is_word=True)
     return WordResponse(**data)
+
+@app.post("/word_quick", response_model=WordResponse)
+def analyze_word_quick(http_request: Request, request: WordRequest) -> WordResponse:
+    user_id = get_user_id(http_request)
+    data = call_translator_word(request.word)
+    if not data.get("valid"):
+        raise HTTPException(status_code=400, detail="That doesn't look like a French word — check your spelling and try again.")
+    log_to_db(user_id, request.word, is_word=True)
+    return WordResponse(**data)
+
+@app.post("/sentence_quick", response_model=SentenceResponse)
+def analyze_sentence_quick(http_request: Request, request: SentenceRequest) -> SentenceResponse:
+    user_id = get_user_id(http_request)
+    data = call_translator_sentence(request.sentence)
+    log_to_db(user_id, request.sentence, is_word=False)
+    return SentenceResponse(**data)
 
 @app.post("/qa", response_model=QuestionResponse)
 def answer_question(request: QuestionRequest) -> QuestionResponse:
