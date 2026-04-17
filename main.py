@@ -240,6 +240,87 @@ def call_translator_word(text: str) -> dict:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def detect_english(text: str) -> bool:
+    try:
+        resp = httpx.post(
+            "https://api.cognitive.microsofttranslator.com/detect",
+            params={"api-version": "3.0"},
+            headers=_AZURE_HEADERS,
+            json=[{"text": text}],
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        detected = resp.json()[0]
+        return detected.get("language") == "en" and detected.get("score", 0) >= 0.5
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def call_translator_word_en(text: str) -> dict:
+    try:
+        if not detect_english(text):
+            return {
+                "valid": False,
+                "translation": None,
+                "conjugations": None,
+                "synonyms": None,
+                "common_phrases": None,
+                "example_sentence": None,
+            }
+
+        translate_resp = httpx.post(
+            "https://api.cognitive.microsofttranslator.com/translate",
+            params={"api-version": "3.0", "from": "en", "to": "fr"},
+            headers=_AZURE_HEADERS,
+            json=[{"text": text}],
+            timeout=10.0,
+        )
+        translate_resp.raise_for_status()
+        translation = translate_resp.json()[0]["translations"][0]["text"]
+
+        return {
+            "valid": True,
+            "translation": translation,
+            "conjugations": None,
+            "synonyms": None,
+            "common_phrases": None,
+            "example_sentence": None,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def call_translator_sentence_en(text: str) -> dict | None:
+    try:
+        if not detect_english(text):
+            return None
+
+        resp = httpx.post(
+            "https://api.cognitive.microsofttranslator.com/translate",
+            params={"api-version": "3.0", "from": "en", "to": "fr"},
+            headers=_AZURE_HEADERS,
+            json=[{"text": text}],
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        translation = resp.json()[0]["translations"][0]["text"]
+
+        return {
+            "translation": translation,
+            "tense": None,
+            "grammar_points": None,
+            "idiomatic_expressions": None,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 def call_translator_sentence(text: str) -> dict:
     try:
         resp = httpx.post(
@@ -374,6 +455,24 @@ def analyze_sentence_quick(http_request: Request, request: SentenceRequest) -> S
         raise HTTPException(status_code=400, detail="That doesn't look like a French sentence — check your input and try again.")
     data = call_translator_sentence(request.sentence)
     log_to_db(user_id, request.sentence, is_word=False)
+    return SentenceResponse(**data)
+
+@app.post("/word_en_quick", response_model=WordResponse)
+def analyze_word_en_quick(http_request: Request, request: WordRequest) -> WordResponse:
+    user_id = get_user_id(http_request)
+    data = call_translator_word_en(request.word)
+    if not data.get("valid"):
+        raise HTTPException(status_code=400, detail="That doesn't look like an English word — check your spelling and try again.")
+    log_to_db(user_id, data["translation"], is_word=True)
+    return WordResponse(**data)
+
+@app.post("/sentence_en_quick", response_model=SentenceResponse)
+def analyze_sentence_en_quick(http_request: Request, request: SentenceRequest) -> SentenceResponse:
+    user_id = get_user_id(http_request)
+    data = call_translator_sentence_en(request.sentence)
+    if data is None:
+        raise HTTPException(status_code=400, detail="That doesn't look like an English sentence — check your input and try again.")
+    log_to_db(user_id, data["translation"], is_word=False)
     return SentenceResponse(**data)
 
 @app.post("/qa", response_model=QuestionResponse)
