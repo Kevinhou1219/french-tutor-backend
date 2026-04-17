@@ -137,6 +137,7 @@ def get_user_id(request: Request) -> str:
 
 
 def log_to_db(user_id: str, content: str, is_word: bool) -> None:
+    content = content.strip().lower()
     try:
         conn = pyodbc.connect(DB_CONNECTION_STRING)
         cursor = conn.cursor()
