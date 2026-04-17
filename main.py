@@ -251,7 +251,7 @@ def detect_english(text: str) -> bool:
         )
         resp.raise_for_status()
         detected = resp.json()[0]
-        return detected.get("language") == "en" and detected.get("score", 0) >= 0.5
+        return detected.get("language") == "en" and detected.get("score", 0) >= 0.85
     except HTTPException:
         raise
     except Exception as e:
